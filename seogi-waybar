@@ -1,0 +1,65 @@
+#!/bin/bash
+#------------------------------------------------ 
+#   seogi-wayber
+#   Custom Waybar module for Seogi IME
+#   
+#   Refer to the usage() function below for usage.
+#
+#   Copyright 2021, Michael Swiger <michael@swiger.dev>
+#------------------------------------------------
+
+short=e:d:s:h
+long=enabled:,disabled:,signal:,help
+opts=`getopt -o "$short" --long "$long" -n "$0" -- "$@"`
+
+if [ $? != 0 ] ; then echo "Failed parsing options." >&2 ; exit 1 ; fi
+
+eval set -- "$opts"
+
+usage() {
+	echo "Usage: $0 SEAT_NAME"
+	echo "Custom Waybar module for Seogi IME"
+	echo "  -d, --disabled    Status text do display when Seogi disabled (default: 한)"
+	echo "  -e, --enabled     Status text to display when Soegi enabled (default: EN)"
+	echo "  -h, --help        Give this help list"
+	echo "  -s, --signal      RT signal sent to Waybar when status changes (default: 8)"
+	exit 1
+}
+
+enabled_text=한
+disabled_text=EN
+signal=8
+
+while true; do
+	case "$1" in
+		-e | --enabled ) enabled_text=$2; shift; shift ;;
+		-d | --disabled ) disabled_text=$2; shift; shift ;;
+		-s | --signal ) signal=$2; shift; shift ;;
+		-h | --help ) usage; break;;
+		-- ) shift; break ;;
+		* ) break ;;
+	esac
+done
+
+mon_iface=org.freedesktop.DBus.Properties
+seat_iface=dev.swiger.Seogi.Seat
+seat_name=${1:-seat0}
+seat_path=/dev/swiger/Seogi/SeatManager/$seat_name
+seogi_service=dev.swiger.Seogi
+
+dbus-monitor --session --profile "type='signal',path='$seat_path',interface='$mon_iface'" |
+while read -r line; do
+	status_reply=$(
+		dbus-send --session --dest=$seogi_service --print-reply $seat_path \
+			org.freedesktop.DBus.Properties.Get string:$seat_iface string:Status
+	)
+	status=$(echo $status_reply | awk '{print $NF}')
+	if [ "$status" == "true" ]; then
+		output_text=$enabled_text
+	else
+		output_text=$disabled_text
+	fi
+	printf '{ "text": "%s" }\n' $output_text
+	command="pkill -RTMIN+$signal waybar"
+	eval command
+done
